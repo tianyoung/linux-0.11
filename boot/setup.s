@@ -29,6 +29,14 @@ begbss:
 
 entry start
 start:
+! Now we are in SETUP
+	mov	ax,#SETUPSEG	
+	mov	ds,ax
+	mov	es,ax
+
+	mov	di,#25
+	mov	si,#msg_setup
+	call	print_info
 
 ! ok, the read went well so we get current cursor position and save it for
 ! posterity.
@@ -39,6 +47,7 @@ start:
 	xor	bh,bh
 	int	0x10		! save it in known place, con_init fetches
 	mov	[0],dx		! it from 0x90000.
+
 ! Get memory size (extended mem, kB)
 
 	mov	ah,#0x88
@@ -127,6 +136,7 @@ do_move:
 ! then we load the segment descriptors
 
 end_move:
+
 	mov	ax,#SETUPSEG	! right, forgot this at first. didn't work :-)
 	mov	ds,ax
 	lidt	idt_48		! load idt with 0,0
@@ -200,6 +210,20 @@ empty_8042:
 	jnz	empty_8042	! yes - loop
 	ret
 
+
+print_info:
+	mov	ah,#0x03
+	xor	bh,bh
+	int 	0x10
+
+	mov	cx,di
+	mov	bp,si
+	mov	bx,#0x007
+	mov	ax,#0x1301
+	int 	0x10
+	ret
+
+
 gdt:
 	.word	0,0,0,0		! dummy
 
@@ -221,6 +245,11 @@ gdt_48:
 	.word	0x800		! gdt limit=2048, 256 GDT entries
 	.word	512+gdt,0x9	! gdt base = 0X9xxxx
 	
+msg_setup:
+	.byte 13,10
+	.ascii "Now we are in SETUP"
+	.byte 13,10,13,10
+
 .text
 endtext:
 .data
