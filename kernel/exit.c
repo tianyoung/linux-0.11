@@ -126,6 +126,7 @@ int do_exit(long code)
 		last_task_used_math = NULL;
 	if (current->leader)
 		kill_session();
+	fprintk(3, "%ld\t%c\t%ld\n", current->pid, 'E', jiffies);
 	current->state = TASK_ZOMBIE;
 	current->exit_code = code;
 	tell_father(current->father);
@@ -183,6 +184,9 @@ repeat:
 	if (flag) {
 		if (options & WNOHANG)
 			return 0;
+
+		//fprintk(3, "flag: %s: %d\n", __func__, current->pid);
+		fprintk(3, "%ld\t%c\t%ld\n", current->pid, 'W', jiffies);
 		current->state=TASK_INTERRUPTIBLE;
 		schedule();
 		if (!(current->signal &= ~(1<<(SIGCHLD-1))))

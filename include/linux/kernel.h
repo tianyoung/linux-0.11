@@ -5,6 +5,8 @@ void verify_area(void * addr,int count);
 volatile void panic(const char * str);
 int printf(const char * fmt, ...);
 int printk(const char * fmt, ...);
+int fprintk(unsigned int fd, const char * fmt, ...);
+//void printplog(long pid, char X, long time);
 int tty_write(unsigned ch,char * buf,int count);
 void * malloc(unsigned int size);
 void free_s(void * obj, int size);

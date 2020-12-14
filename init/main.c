@@ -101,6 +101,8 @@ static long main_memory_start = 0;
 
 struct drive_info { char dummy[32]; } drive_info;
 
+static int printf(const char *fmt, ...);
+
 void main(void)		/* This really IS void, no error here. */
 {			/* The startup routine assumes (well, ...) this */
 /*
@@ -135,6 +137,14 @@ void main(void)		/* This really IS void, no error here. */
 	floppy_init();
 	sti();
 	move_to_user_mode();
+	setup((void *) &drive_info);
+	(void) open("/dev/tty0",O_RDWR,0);
+	(void) dup(0);
+	(void) dup(0);
+	(void) open("/var/process.log",O_CREAT|O_TRUNC|O_WRONLY,0666);
+	// In user mode
+	printf("opened the process.log\n");
+	
 	if (!fork()) {		/* we count on this going ok */
 		init();
 	}
@@ -165,14 +175,12 @@ static char * envp_rc[] = { "HOME=/", NULL };
 static char * argv[] = { "-/bin/sh",NULL };
 static char * envp[] = { "HOME=/usr/root", NULL };
 
+
+
 void init(void)
 {
 	int pid,i;
 
-	setup((void *) &drive_info);
-	(void) open("/dev/tty0",O_RDWR,0);
-	(void) dup(0);
-	(void) dup(0);
 	printf("%d buffers = %d bytes buffer space\n\r",NR_BUFFERS,
 		NR_BUFFERS*BLOCK_SIZE);
 	printf("Free mem: %d bytes\n\r",memory_end-main_memory_start);
@@ -183,6 +191,8 @@ void init(void)
 		execve("/bin/sh",argv_rc,envp_rc);
 		_exit(2);
 	}
+	printf("wait pid:%d\n", pid);
+	//1-W
 	if (pid>0)
 		while (pid != wait(&i))
 			/* nothing */;
@@ -199,6 +209,7 @@ void init(void)
 			(void) dup(0);
 			_exit(execve("/bin/sh",argv,envp));
 		}
+		//1-W
 		while (1)
 			if (pid == wait(&i))
 				break;
