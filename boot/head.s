@@ -1,88 +1,91 @@
-/*
- *  linux/boot/head.s
- *
- *  (C) 1991  Linus Torvalds
- */
+#  head.s contains the 32-bit startup code.
+#  Two L3 task multitasking. The code of tasks are in kernel area, 
+#  just like the Linux. The kernel code is located at 0x10000. 
+SCRN_SEL	= 0x18
+TSS0_SEL	= 0x20
+LDT0_SEL	= 0x28
+TSS1_SEL	= 0X30
+LDT1_SEL	= 0x38
 
-/*
- *  head.s contains the 32-bit startup code.
- *
- * NOTE!!! Startup happens at absolute address 0x00000000, which is also where
- * the page directory will exist. The startup code will be overwritten by
- * the page directory.
- */
-.text
-.globl idt,gdt,pg_dir,tmp_floppy_area
+.globl gdt, idt, pg_dir, tmp_floppy_area
 pg_dir:
-.globl startup_32
+tmp_floppy_area:
+.text
 startup_32:
 	movl $0x10,%eax
 	mov %ax,%ds
-	mov %ax,%es
-	mov %ax,%fs
-	mov %ax,%gs
-	lss stack_start,%esp
+#	mov %ax,%es
+	lss init_stack,%esp
+
+# setup base fields of descriptors.
 	call setup_idt
 	call setup_gdt
 	movl $0x10,%eax		# reload all the segment registers
-	mov %ax,%ds		# after changing gdt. CS was already
-	mov %ax,%es		# reloaded in 'setup_gdt'
+	mov %ax,%ds		# after changing gdt. 
+	mov %ax,%es
 	mov %ax,%fs
 	mov %ax,%gs
-	lss stack_start,%esp
-	xorl %eax,%eax
-1:	incl %eax		# check that A20 really IS enabled
-	movl %eax,0x000000	# loop forever if it isn't
-	cmpl %eax,0x100000
-	je 1b
+	lss init_stack,%esp
 
-/*
- * NOTE! 486 should set bit 16, to check for write-protect in supervisor
- * mode. Then it would be unnecessary with the "verify_area()"-calls.
- * 486 users probably want to set the NE (#5) bit also, so as to use
- * int 16 for math errors.
- */
-	movl %cr0,%eax		# check math chip
-	andl $0x80000011,%eax	# Save PG,PE,ET
-/* "orl $0x10020,%eax" here for 486 might be good */
-	orl $2,%eax		# set MP
-	movl %eax,%cr0
-	call check_x87
-	jmp after_page_tables
+# setup up timer 8253 chip.
+	movb $0x36, %al
+	movl $0x43, %edx
+	outb %al, %dx
+	movl $11930, %eax        # timer frequency 100 HZ 
+	movl $0x40, %edx
+	outb %al, %dx
+	movb %ah, %al
+	outb %al, %dx
 
-/*
- * We depend on ET to be correct. This checks for 287/387.
- */
-check_x87:
-	fninit
-	fstsw %ax
-	cmpb $0,%al
-	je 1f			/* no coprocessor: have to set bits */
-	movl %cr0,%eax
-	xorl $6,%eax		/* reset MP, set EM */
-	movl %eax,%cr0
+# setup timer & system call interrupt descriptors.
+	movl $0x00080000, %eax	
+	movw $timer_interrupt, %ax
+	movw $0xef00, %dx
+	#movw $0x8E00, %dx
+	movl $0x08, %ecx              # The PC default timer int.
+	lea idt(,%ecx,8), %esi
+	movl %eax,(%esi) 
+	movl %edx,4(%esi)
+	movw $system_interrupt, %ax
+	movw $0xef00, %dx
+	movl $0x80, %ecx
+	lea idt(,%ecx,8), %esi
+	movl %eax,(%esi) 
+	movl %edx,4(%esi)
+
+# unmask the timer interrupt.
+#	movl $0x21, %edx
+#	inb %dx, %al
+#	andb $0xfe, %al
+#	outb %al, %dx
+
+# Move to user mode (task 0)
+	pushfl
+	andl $0xffffbfff, (%esp)
+	popfl
+	movl $TSS0_SEL, %eax
+	ltr %ax
+	movl $LDT0_SEL, %eax
+	lldt %ax 
+	movl $0, current
+	sti
+	pushl $0x17
+	pushl $init_stack
+	pushfl
+	pushl $0x0f
+	pushl $task0
+	iret
+
+/****************************************/
+setup_gdt:
+	lgdt lgdt_opcode
 	ret
-.align 2
-1:	.byte 0xDB,0xE4		/* fsetpm for 287, ignored by 387 */
-	ret
 
-/*
- *  setup_idt
- *
- *  sets up a idt with 256 entries pointing to
- *  ignore_int, interrupt gates. It then loads
- *  idt. Everything that wants to install itself
- *  in the idt-table may do so themselves. Interrupts
- *  are enabled elsewhere, when we can be relatively
- *  sure everything is ok. This routine will be over-
- *  written by the page tables.
- */
 setup_idt:
 	lea ignore_int,%edx
 	movl $0x00080000,%eax
 	movw %dx,%ax		/* selector = 0x0008 = cs */
 	movw $0x8E00,%dx	/* interrupt gate - dpl=0, present */
-
 	lea idt,%edi
 	mov $256,%ecx
 rp_sidt:
@@ -91,150 +94,189 @@ rp_sidt:
 	addl $8,%edi
 	dec %ecx
 	jne rp_sidt
-	lidt idt_descr
+	lidt lidt_opcode
 	ret
 
-/*
- *  setup_gdt
- *
- *  This routines sets up a new gdt and loads it.
- *  Only two entries are currently built, the same
- *  ones that were built in init.s. The routine
- *  is VERY complicated at two whole lines, so this
- *  rather long comment is certainly needed :-).
- *  This routine will beoverwritten by the page tables.
- */
-setup_gdt:
-	lgdt gdt_descr
+# -----------------------------------
+write_char:
+	push %gs
+	pushl %ebx
+#	pushl %eax
+	mov $SCRN_SEL, %ebx
+	mov %bx, %gs
+	movl scr_loc, %ebx
+	shl $1, %ebx
+	mov %ax, %gs:(%ebx)
+	shr $1, %ebx
+	incl %ebx
+	cmpl $2000, %ebx
+	jb 1f
+	movl $0, %ebx
+1:	movl %ebx, scr_loc	
+#	popl %eax
+	popl %ebx
+	pop %gs
 	ret
 
-/*
- * I put the kernel page tables right after the page directory,
- * using 4 of them to span 16 Mb of physical memory. People with
- * more than 16MB will have to expand this.
- */
-.org 0x1000
-pg0:
-
-.org 0x2000
-pg1:
-
-.org 0x3000
-pg2:
-
-.org 0x4000
-pg3:
-
-.org 0x5000
-/*
- * tmp_floppy_area is used by the floppy-driver when DMA cannot
- * reach to a buffer-block. It needs to be aligned, so that it isn't
- * on a 64kB border.
- */
-tmp_floppy_area:
-	.fill 1024,1,0
-
-after_page_tables:
-	pushl $0		# These are the parameters to main :-)
-	pushl $0
-	pushl $0
-	pushl $L6		# return address for main, if it decides to.
-	pushl $main
-	jmp setup_paging
-L6:
-	jmp L6			# main should never return here, but
-				# just in case, we know what happens.
-
+/***********************************************/
 /* This is the default interrupt "handler" :-) */
-int_msg:
-	.asciz "Unknown interrupt\n\r"
 .align 2
 ignore_int:
-	pushl %eax
-	pushl %ecx
-	pushl %edx
 	push %ds
-	push %es
-	push %fs
-	movl $0x10,%eax
-	mov %ax,%ds
-	mov %ax,%es
-	mov %ax,%fs
-	pushl $int_msg
-	call printk
+	pushl %eax
+	movl $0x10, %eax
+	mov %ax, %ds
+	movl $0xD43, %eax            /* print 'C' */
+	call write_char
+#ignore_int_stop: jmp ignore_int_stop
 	popl %eax
-	pop %fs
-	pop %es
 	pop %ds
-	popl %edx
-	popl %ecx
-	popl %eax
 	iret
 
-
-/*
- * Setup_paging
- *
- * This routine sets up paging by setting the page bit
- * in cr0. The page tables are set up, identity-mapping
- * the first 16MB. The pager assumes that no illegal
- * addresses are produced (ie >4Mb on a 4Mb machine).
- *
- * NOTE! Although all physical memory should be identity
- * mapped by this routine, only the kernel page functions
- * use the >1Mb addresses directly. All "normal" functions
- * use just the lower 1Mb, or the local data space, which
- * will be mapped to some other place - mm keeps track of
- * that.
- *
- * For those with more memory than 16 Mb - tough luck. I've
- * not got it, why should you :-) The source is here. Change
- * it. (Seriously - it shouldn't be too difficult. Mostly
- * change some constants etc. I left it at 16Mb, as my machine
- * even cannot be extended past that (ok, but it was cheap :-)
- * I've tried to show which constants to change by having
- * some kind of marker at them (search for "16Mb"), but I
- * won't guarantee that's all :-( )
- */
+/* Timer interrupt handler */ 
 .align 2
-setup_paging:
-	movl $1024*5,%ecx		/* 5 pages - pg_dir+4 page tables */
-	xorl %eax,%eax
-	xorl %edi,%edi			/* pg_dir is at 0x000 */
-	cld;rep;stosl
-	movl $pg0+7,pg_dir		/* set present bit/user r/w */
-	movl $pg1+7,pg_dir+4		/*  --------- " " --------- */
-	movl $pg2+7,pg_dir+8		/*  --------- " " --------- */
-	movl $pg3+7,pg_dir+12		/*  --------- " " --------- */
-	movl $pg3+4092,%edi
-	movl $0xfff007,%eax		/*  16Mb - 4096 + 7 (r/w user,p) */
-	std
-1:	stosl			/* fill pages backwards - more efficient :-) */
-	subl $0x1000,%eax
-	jge 1b
-	xorl %eax,%eax		/* pg_dir is at 0x0000 */
-	movl %eax,%cr3		/* cr3 - page directory start */
-	movl %cr0,%eax
-	orl $0x80000000,%eax
-	movl %eax,%cr0		/* set paging (PG) bit */
-	ret			/* this also flushes prefetch-queue */
+timer_interrupt:
+#	push %ds
+#	pushl %eax
+#	movl $0x10, %eax
+#	mov %ax, %ds
+#	movl $0x544, %eax            /* print 'D' */
+#	call write_char
+#ignore_int_stop: jmp ignore_int_stop
+#	popl %eax
+#	pop %ds
+#	iret
+
+
+
+
+
+
+
+
+#stop:	jmp stop
+	push %ds
+	pushl %eax
+	movl $0x10, %eax
+	mov %ax, %ds
+	movb $0x20, %al
+	outb %al, $0x20
+	movl $1, %eax
+	cmpl %eax, current
+	je 1f
+	movl %eax, current
+	ljmp $TSS1_SEL, $0
+	jmp 2f
+1:	movl $0, current
+	ljmp $TSS0_SEL, $0
+2:	popl %eax
+	pop %ds
+	iret
+
+/* system call handler */
+.align 2
+system_interrupt:
+	push %ds
+	pushl %edx
+	pushl %ecx
+	pushl %ebx
+	pushl %eax
+	movl $0x10, %edx
+	mov %dx, %ds
+	call write_char
+	popl %eax
+	popl %ebx
+	popl %ecx
+	popl %edx
+	pop %ds
+	iret
+
+/*********************************************/
+current:.long 0
+scr_loc:.long 0
 
 .align 2
-.word 0
-idt_descr:
+lidt_opcode:
 	.word 256*8-1		# idt contains 256 entries
-	.long idt
-.align 2
-.word 0
-gdt_descr:
-	.word 256*8-1		# so does gdt (not that that's any
-	.long gdt		# magic number, but it works for me :^)
+	.long idt		# This will be rewrite by code. 
+lgdt_opcode:
+	.word (end_gdt-gdt)-1	# so does gdt 
+	.long gdt		# This will be rewrite by code.
 
 	.align 8
 idt:	.fill 256,8,0		# idt is uninitialized
 
 gdt:	.quad 0x0000000000000000	/* NULL descriptor */
-	.quad 0x00c09a0000000fff	/* 16Mb */
-	.quad 0x00c0920000000fff	/* 16Mb */
-	.quad 0x0000000000000000	/* TEMPORARY - don't use */
-	.fill 252,8,0			/* space for LDT's and TSS's etc */
+	.quad 0x00c09a00000007ff	/* 8Mb 0x08, base = 0x00000 */
+	.quad 0x00c09200000007ff	/* 8Mb 0x10 */
+	.quad 0x00c0920b80000002	/* screen 0x18 - for display */
+
+	.word 0x0068, tss0, 0xe900, 0x0	# TSS0 descr 0x20
+	.word 0x0040, ldt0, 0xe200, 0x0	# LDT0 descr 0x28
+	.word 0x0068, tss1, 0xe900, 0x0	# TSS1 descr 0x30
+	.word 0x0040, ldt1, 0xe200, 0x0	# LDT1 descr 0x38
+end_gdt:
+	.fill 128,4,0
+init_stack:                          # Will be used as user stack for task0.
+	.long init_stack
+	.word 0x10
+
+/*************************************/
+.align 8
+ldt0:	.quad 0x0000000000000000
+	.quad 0x00c0fa00000003ff	# 0x0f, base = 0x00000
+	.quad 0x00c0f200000003ff	# 0x17
+
+tss0:	.long 0 			/* back link */
+	.long krn_stk0, 0x10		/* esp0, ss0 */
+	.long 0, 0, 0, 0, 0		/* esp1, ss1, esp2, ss2, cr3 */
+	.long 0, 0, 0, 0, 0		/* eip, eflags, eax, ecx, edx */
+	.long 0, 0, 0, 0, 0		/* ebx esp, ebp, esi, edi */
+	.long 0, 0, 0, 0, 0, 0 		/* es, cs, ss, ds, fs, gs */
+	.long LDT0_SEL, 0x8000000	/* ldt, trace bitmap */
+
+	.fill 128,4,0
+krn_stk0:
+#	.long 0
+
+/************************************/
+.align 8
+ldt1:	.quad 0x0000000000000000
+	.quad 0x00c0fa00000003ff	# 0x0f, base = 0x00000
+	.quad 0x00c0f200000003ff	# 0x17
+
+tss1:	.long 0 			/* back link */
+	.long krn_stk1, 0x10		/* esp0, ss0 */
+	.long 0, 0, 0, 0, 0		/* esp1, ss1, esp2, ss2, cr3 */
+	.long task1, 0x200		/* eip, eflags */
+	.long 0, 0, 0, 0		/* eax, ecx, edx, ebx */
+	.long usr_stk1, 0, 0, 0		/* esp, ebp, esi, edi */
+	.long 0x17,0x0f,0x17,0x17,0x17,0x17 /* es, cs, ss, ds, fs, gs */
+	.long LDT1_SEL, 0x8000000	/* ldt, trace bitmap */
+
+	.fill 128,4,0
+krn_stk1:
+
+/************************************/
+task0:
+	movl $0x17, %eax
+	movw %ax, %ds
+	mov $0x0941, %ax              /* print 'A' */
+	int $0x80
+	movl $0xffffff, %ecx
+1:	loop 1b
+	int $0x08
+	jmp task0 
+
+task1:
+	movl $0x17, %eax
+	movw %ax, %ds
+	mov $0x0C42, %ax            /* print 'B' */
+	int $0x80
+	movl $0xffffff, %ecx
+1:	loop 1b
+	int $0x08
+	jmp task1
+
+	.fill 128,4,0 
+usr_stk1:
