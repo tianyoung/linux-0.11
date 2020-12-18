@@ -40,9 +40,8 @@ startup_32:
 # setup timer & system call interrupt descriptors.
 	movl $0x00080000, %eax	
 	movw $timer_interrupt, %ax
-	movw $0xef00, %dx
-	#movw $0x8E00, %dx
-	movl $0x08, %ecx              # The PC default timer int.
+	movw $0x8E00, %dx
+	movl $0x20, %ecx
 	lea idt(,%ecx,8), %esi
 	movl %eax,(%esi) 
 	movl %edx,4(%esi)
@@ -54,10 +53,10 @@ startup_32:
 	movl %edx,4(%esi)
 
 # unmask the timer interrupt.
-#	movl $0x21, %edx
-#	inb %dx, %al
-#	andb $0xfe, %al
-#	outb %al, %dx
+	movl $0x21, %edx
+	inb %dx, %al
+	andb $0xfe, %al
+	outb %al, %dx
 
 # Move to user mode (task 0)
 	pushfl
@@ -128,7 +127,6 @@ ignore_int:
 	mov %ax, %ds
 	movl $0xD43, %eax            /* print 'C' */
 	call write_char
-#ignore_int_stop: jmp ignore_int_stop
 	popl %eax
 	pop %ds
 	iret
@@ -136,25 +134,6 @@ ignore_int:
 /* Timer interrupt handler */ 
 .align 2
 timer_interrupt:
-#	push %ds
-#	pushl %eax
-#	movl $0x10, %eax
-#	mov %ax, %ds
-#	movl $0x544, %eax            /* print 'D' */
-#	call write_char
-#ignore_int_stop: jmp ignore_int_stop
-#	popl %eax
-#	pop %ds
-#	iret
-
-
-
-
-
-
-
-
-#stop:	jmp stop
 	push %ds
 	pushl %eax
 	movl $0x10, %eax
@@ -263,9 +242,8 @@ task0:
 	movw %ax, %ds
 	mov $0x0941, %ax              /* print 'A' */
 	int $0x80
-	movl $0xffffff, %ecx
+	movl $0xfffff, %ecx
 1:	loop 1b
-	int $0x08
 	jmp task0 
 
 task1:
@@ -273,9 +251,8 @@ task1:
 	movw %ax, %ds
 	mov $0x0C42, %ax            /* print 'B' */
 	int $0x80
-	movl $0xffffff, %ecx
+	movl $0xfffff, %ecx
 1:	loop 1b
-	int $0x08
 	jmp task1
 
 	.fill 128,4,0 
