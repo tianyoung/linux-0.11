@@ -184,7 +184,7 @@ timer_interrupt:
 	movl %esp,task0_esp	
 	movl task1_esp,%esp 
 	
-	movl $LDT1_SEL,%ecx
+	movl $LDT0_SEL,%ecx
 	lldt %cx 
 
 	jmp 2f
@@ -258,8 +258,6 @@ gdt:	.quad 0x0000000000000000	/* NULL descriptor */
 
 	.word 0x0068, tss0, 0xe900, 0x0	# TSS0 descr 0x20
 	.word 0x0040, ldt0, 0xe200, 0x0	# LDT0 descr 0x28
-	.word 0x0068, tss1, 0xe900, 0x0	# TSS1 descr 0x30
-	.word 0x0040, ldt1, 0xe200, 0x0	# LDT1 descr 0x38
 end_gdt:
 	.fill 128,4,0
 init_stack:                          # Will be used as user stack for task0.
@@ -282,23 +280,6 @@ tss0:	.long 0 			/* back link */
 
 	.fill 128,4,0
 krn_stk0:
-#	.long 0
-
-/************************************/
-.align 8
-ldt1:	.quad 0x0000000000000000
-	.quad 0x00c0fa00000003ff	# 0x0f, base = 0x00000
-	.quad 0x00c0f200000003ff	# 0x17
-
-tss1:	.long 0 			/* back link */
-	.long krn_stk1, 0x10		/* esp0, ss0 */
-	.long 0, 0, 0, 0, 0		/* esp1, ss1, esp2, ss2, cr3 */
-	.long task1, 0x200		/* eip, eflags */
-	.long 0, 0, 0, 0		/* eax, ecx, edx, ebx */
-	.long usr_stk1, 0, 0, 0		/* esp, ebp, esi, edi */
-	.long 0x17,0x0f,0x17,0x17,0x17,0x17 /* es, cs, ss, ds, fs, gs */
-	.long LDT1_SEL, 0x8000000	/* ldt, trace bitmap */
-
 	.fill 128,4,0
 krn_stk1:
 
@@ -308,7 +289,7 @@ task0:
 	movw %ax, %ds
 	mov $0x0941, %ax              /* print 'A' */
 	int $0x80
-	movl $0xfffff, %ecx
+	movl $0xfff, %ecx
 1:	loop 1b
 	jmp task0 
 
@@ -317,7 +298,7 @@ task1:
 	movw %ax, %ds
 	mov $0x0C42, %ax            /* print 'B' */
 	int $0x80
-	movl $0xfffff, %ecx
+	movl $0xfff, %ecx
 1:	loop 1b
 	jmp task1
 
