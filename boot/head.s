@@ -135,7 +135,16 @@ ignore_int:
 .align 2
 timer_interrupt:
 	push %ds
+	push %es
+	push %fs
+	push %gs
+	pushl %esi
+	pushl %edi
+	pushl %edx
+	pushl %ebp
 	pushl %eax
+	pushl %ebx
+	pushl %ecx
 	movl $0x10, %eax
 	mov %ax, %ds
 	movb $0x20, %al
@@ -143,13 +152,66 @@ timer_interrupt:
 	movl $1, %eax
 	cmpl %eax, current
 	je 1f
-	movl %eax, current
-	ljmp $TSS1_SEL, $0
+	cmpl %eax,fork_init 
+	je   3f	
+	movl $krn_stk1,%ebx	
+	movl $0x17,-4(%ebx)  #ss
+	movl $usr_stk1,-8(%ebx) #esp
+	movl $0x200,-12(%ebx) #eflags
+	movl $0x0f,-16(%ebx)	#cs
+	movl $task1, -20(%ebx)	#eip
+
+	movl $0x17,-24(%ebx) # ds
+	movl $0x17,-28(%ebx) #es 
+	movl $0x17,-32(%ebx) #fs
+	movl $0x17,-36(%ebx) #gs
+	movl $0x0,-40(%ebx)  #esi
+	movl $0x0,-44(%ebx)  #edi
+	movl $0x0,-48(%ebx)  #edx
+	movl $0x0,-52(%ebx)  #ebp
+	movl $0x0, -56(%ebx) # eax
+	movl $0x0, -60(%ebx) # ebx
+	movl $0x0, -64(%ebx) # ecx	
+	
+	subl $64, %ebx
+	movl %ebx, task1_esp
+
+	movl %eax,fork_init
+3:	movl %eax,current  #task1
+	movl $tss0,%ebx		
+	movl $krn_stk1,4(%ebx)
+	
+	movl %esp,task0_esp	
+	movl task1_esp,%esp 
+	
+	movl $LDT1_SEL,%ecx
+	lldt %cx 
+
 	jmp 2f
-1:	movl $0, current
-	ljmp $TSS0_SEL, $0
-2:	popl %eax
-	pop %ds
+1:	movl $0, current  #task0
+
+	movl $tss0,%ebx		
+	movl $krn_stk0,4(%ebx)
+	
+	movl %esp,task1_esp	
+	movl task0_esp,%esp 
+	
+	movl $LDT0_SEL,%ecx
+	lldt %cx 
+
+2:	movl $0x17,%ecx 
+	mov  %cx,%fs
+	popl %ecx
+	popl %ebx
+	popl %eax
+	popl %ebp
+	popl %edx
+	popl %edi
+	popl %esi
+	pop  %gs
+	pop  %fs
+	pop  %es
+	pop  %ds
 	iret
 
 /* system call handler */
@@ -173,6 +235,10 @@ system_interrupt:
 /*********************************************/
 current:.long 0
 scr_loc:.long 0
+fork_init:.long 0
+task0_esp:.long 0
+task1_esp:.long 0
+
 
 .align 2
 lidt_opcode:
