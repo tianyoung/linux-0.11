@@ -48,9 +48,9 @@ OLDSS		= 0x2C
 state	= 0		# these are offsets into the task-struct.
 counter	= 4
 priority = 8
-signal	= 12
-sigaction = 16		# MUST be 16 (=len of sigaction)
-blocked = (33*16)
+signal	= 16
+sigaction = 20		# MUST be 16 (=len of sigaction)
+blocked = (33*16 + 4)
 
 # offsets within sigaction
 sa_handler = 0
@@ -67,7 +67,7 @@ nr_system_calls = 74
 .globl system_call,sys_fork,timer_interrupt,sys_execve
 .globl hd_interrupt,floppy_interrupt,parallel_interrupt
 .globl device_not_available, coprocessor_error
-
+.globl switch_to,first_return_from_kernel
 .align 2
 bad_sys_call:
 	movl $-1,%eax
@@ -282,4 +282,47 @@ parallel_interrupt:
 	movb $0x20,%al
 	outb %al,$0x20
 	popl %eax
+	iret
+
+.align 2
+switch_to:
+	pushl %ebp
+	movl  %esp,%ebp
+	pushl %ecx
+	pushl %ebx
+	pushl %eax
+	movl  8(%ebp),%ebx
+	cmpl  %ebx,current
+	je    1f
+	#PCB
+	movl  %ebx,%eax
+	xchgl %eax,current # eax=current
+	movl  tss,%ecx
+	addl  $4096,%ebx
+	movl  %ebx, 4(%ecx)
+
+	movl  %esp,12(%eax)
+	movl  8(%ebp),%ebx
+	movl  12(%ebx),%esp
+	movl  12(%ebp),%ecx
+	lldt  %cx
+	movl  $0x17,%ecx
+	mov   %cx,%fs
+	cmpl  %eax,last_task_used_math
+	jne   1f
+	clts
+1:	popl  %eax
+	popl  %ebx
+	popl  %ecx
+	popl  %ebp
+	ret
+.align 2
+first_return_from_kernel:
+	popl  %edx
+	popl  %edi
+	popl  %esi
+	pop   %gs
+	pop   %fs
+	pop   %es
+	pop   %ds
 	iret

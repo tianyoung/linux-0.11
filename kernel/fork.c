@@ -18,6 +18,7 @@
 #include <asm/system.h>
 
 extern void write_verify(unsigned long address);
+extern void first_return_from_kernel(void);
 
 long last_pid=0;
 
@@ -74,6 +75,7 @@ int copy_process(int nr,long ebp,long edi,long esi,long gs,long none,
 	struct task_struct *p;
 	int i;
 	struct file *f;
+	long *stack;
 
 	p = (struct task_struct *) get_free_page();
 	if (!p)
@@ -91,29 +93,27 @@ int copy_process(int nr,long ebp,long edi,long esi,long gs,long none,
 	p->utime = p->stime = 0;
 	p->cutime = p->cstime = 0;
 	p->start_time = jiffies;
-	p->tss.back_link = 0;
-	p->tss.esp0 = PAGE_SIZE + (long) p;
-	p->tss.ss0 = 0x10;
-	p->tss.eip = eip;
-	p->tss.eflags = eflags;
-	p->tss.eax = 0;
-	p->tss.ecx = ecx;
-	p->tss.edx = edx;
-	p->tss.ebx = ebx;
-	p->tss.esp = esp;
-	p->tss.ebp = ebp;
-	p->tss.esi = esi;
-	p->tss.edi = edi;
-	p->tss.es = es & 0xffff;
-	p->tss.cs = cs & 0xffff;
-	p->tss.ss = ss & 0xffff;
-	p->tss.ds = ds & 0xffff;
-	p->tss.fs = fs & 0xffff;
-	p->tss.gs = gs & 0xffff;
-	p->tss.ldt = _LDT(nr);
-	p->tss.trace_bitmap = 0x80000000;
-	if (last_task_used_math == current)
-		__asm__("clts ; fnsave %0"::"m" (p->tss.i387));
+
+	stack = (long *)(PAGE_SIZE + (long)p);
+	*(--stack) = ss & 0xffff;
+	*(--stack) = esp;
+	*(--stack) = eflags;
+	*(--stack) = cs & 0xffff;
+	*(--stack) = eip;
+	*(--stack) = ds & 0xffff;
+	*(--stack) = es & 0xffff;
+	*(--stack) = fs & 0xffff;
+	*(--stack) = gs & 0xffff;
+	*(--stack) = esi;
+	*(--stack) = edi;
+	*(--stack) = edx;
+	*(--stack) = (long)first_return_from_kernel;
+	*(--stack) = ebp;
+	*(--stack) = ecx;
+	*(--stack) = ebx;
+	*(--stack) = 0;
+	p->kernelstack = stack;
+
 	if (copy_mem(nr,p)) {
 		task[nr] = NULL;
 		free_page((long) p);
